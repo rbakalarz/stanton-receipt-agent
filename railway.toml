@@ -1,0 +1,7 @@
+[build]
+builder = "dockerfile"
+
+[deploy]
+# Run nightly at 2am Bogotá time (UTC-5 = 7am UTC)
+cronSchedule = "0 7 * * *"
+restartPolicyType = "never"
