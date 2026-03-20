@@ -1,14 +1,24 @@
 FROM python:3.12-slim
 
-# Install wkhtmltopdf
+# Install dependencies for wkhtmltopdf
 RUN apt-get update && apt-get install -y \
-    wkhtmltopdf \
+    wget \
     xvfb \
+    libfontconfig1 \
+    libfreetype6 \
+    libx11-6 \
+    libxext6 \
+    libxrender1 \
+    libssl3 \
+    ca-certificates \
+    fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
-# Wrapper so wkhtmltopdf works headless
-RUN echo '#!/bin/bash\nxvfb-run -a --server-args="-screen 0, 1024x768x24" /usr/bin/wkhtmltopdf --load-error-handling ignore "$@"' \
-    > /usr/local/bin/wkhtmltopdf-headless && chmod +x /usr/local/bin/wkhtmltopdf-headless
+# Install wkhtmltopdf from GitHub releases (pre-built binary for Debian Bookworm)
+RUN wget -q https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_amd64.deb \
+    && apt-get update && apt-get install -y ./wkhtmltox_0.12.6.1-3.bookworm_amd64.deb \
+    && rm wkhtmltox_0.12.6.1-3.bookworm_amd64.deb \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
