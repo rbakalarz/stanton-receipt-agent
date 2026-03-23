@@ -1,32 +1,47 @@
 """
 Google Drive Client
 ===================
-Uploads PDFs to a shared Google Drive folder organized by YYYY-MM.
+Uses Gmail OAuth credentials (not service account) to upload PDFs.
+Service accounts cannot upload to personal My Drive - they have no quota.
 """
 
 import os
 import json
 import logging
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 log = logging.getLogger(__name__)
 
-DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
+DRIVE_SCOPES = [
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
+]
 
 
 class DriveClient:
     def __init__(self):
-        sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if not sa_json:
-            raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON env var not set")
+        creds_json = os.environ.get("GMAIL_CREDENTIALS_JSON")
+        if not creds_json:
+            raise ValueError("GMAIL_CREDENTIALS_JSON env var not set")
 
-        sa_info = json.loads(sa_json)
-        creds = service_account.Credentials.from_service_account_info(
-            sa_info, scopes=DRIVE_SCOPES
+        creds_data = json.loads(creds_json)
+        self.creds = Credentials(
+            token=creds_data.get("token"),
+            refresh_token=creds_data.get("refresh_token"),
+            token_uri=creds_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+            client_id=creds_data.get("client_id"),
+            client_secret=creds_data.get("client_secret"),
+            scopes=DRIVE_SCOPES,
         )
-        self.service = build("drive", "v3", credentials=creds)
+
+        if self.creds.expired and self.creds.refresh_token:
+            self.creds.refresh(Request())
+
+        self.service = build("drive", "v3", credentials=self.creds)
 
         self.root_folder_id = os.environ.get("DRIVE_ROOT_FOLDER_ID")
         if not self.root_folder_id:
@@ -47,7 +62,6 @@ class DriveClient:
             body=file_metadata,
             media_body=media,
             fields="id, webViewLink",
-            supportsAllDrives=True,
         ).execute()
 
         drive_url = file.get("webViewLink", "")
@@ -72,10 +86,7 @@ class DriveClient:
             f"trashed=false"
         )
         results = self.service.files().list(
-            q=query,
-            fields="files(id, name)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
+            q=query, fields="files(id, name)"
         ).execute()
 
         files = results.get("files", [])
@@ -88,9 +99,7 @@ class DriveClient:
                 "parents": [self.root_folder_id],
             }
             folder = self.service.files().create(
-                body=metadata,
-                fields="id",
-                supportsAllDrives=True,
+                body=metadata, fields="id"
             ).execute()
             folder_id = folder["id"]
             log.info(f"Created Drive folder: {name}")
