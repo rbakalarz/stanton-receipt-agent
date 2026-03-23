@@ -1,105 +1,47 @@
 """
-PDF Generator
-=============
-Converts a receipt email to a clean PDF using wkhtmltopdf.
-Falls back to a plain-text summary PDF if HTML is not available.
+PDF Generator - uses fpdf2 (pure Python, no system binary needed)
 """
-
 import os
-import re
 import tempfile
-import subprocess
 import logging
-from pathlib import Path
+from fpdf import FPDF
 
 log = logging.getLogger(__name__)
 
-WKHTMLTOPDF = os.environ.get("WKHTMLTOPDF_PATH", "/usr/bin/wkhtmltopdf")
-WKHTMLTOPDF_ARGS = [
-    "--quiet",
-    "--page-size", "A4",
-    "--margin-top", "10mm",
-    "--margin-bottom", "10mm",
-    "--margin-left", "10mm",
-    "--margin-right", "10mm",
-    "--encoding", "UTF-8",
-    "--disable-javascript",
-    "--no-images",          # faster, no external image fetches
-]
-
 
 def generate_receipt_pdf(message: dict) -> str:
-    """
-    Convert email message to PDF.
-    Returns path to temp PDF file (caller is responsible for cleanup).
-    """
-    html = message.get("html_body") or _text_to_html(message)
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_margins(15, 15, 15)
 
-    with tempfile.NamedTemporaryFile(suffix=".html", mode="w",
-                                     encoding="utf-8", delete=False) as f:
-        f.write(html)
-        html_path = f.name
+    pdf.set_font("Helvetica", "B", 16)
+    subject = message.get("subject", "Receipt")[:80]
+    pdf.cell(0, 10, subject, ln=True)
+    pdf.ln(2)
 
-    pdf_path = html_path.replace(".html", ".pdf")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, f"From: {message.get('from', '')[:80]}", ln=True)
+    pdf.cell(0, 6, f"Date: {message.get('date', '')[:80]}", ln=True)
+    pdf.cell(0, 6, "To: r@stanton.co", ln=True)
+    pdf.ln(4)
 
-    try:
-        subprocess.run(
-            [WKHTMLTOPDF] + WKHTMLTOPDF_ARGS + [html_path, pdf_path],
-            check=True,
-            capture_output=True,
-            timeout=30,
-        )
-        log.info(f"Generated PDF: {pdf_path}")
-        return pdf_path
+    pdf.set_draw_color(200, 200, 200)
+    pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+    pdf.ln(4)
 
-    except subprocess.CalledProcessError as e:
-        log.error(f"wkhtmltopdf failed: {e.stderr.decode()}")
-        # Fallback: plain summary
-        return _generate_summary_pdf(message)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", 11)
+    body = message.get("body", "").strip() or "(No plain text body available)"
 
-    finally:
-        os.unlink(html_path)
+    for line in body.splitlines():
+        if pdf.get_y() > 270:
+            pdf.add_page()
+        safe_line = line.encode("latin-1", errors="replace").decode("latin-1")
+        pdf.multi_cell(0, 6, safe_line[:200])
 
-
-def _text_to_html(message: dict) -> str:
-    """Wrap plain text body in minimal HTML for wkhtmltopdf."""
-    body = message.get("body", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    body_html = body.replace("\n", "<br>\n")
-
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-  body {{ font-family: Arial, sans-serif; font-size: 13px; color: #333; padding: 20px; }}
-  .header {{ color: #666; font-size: 11px; border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-bottom: 16px; }}
-  .subject {{ font-size: 18px; font-weight: bold; color: #111; margin-bottom: 8px; }}
-</style>
-</head>
-<body>
-  <div class="header">
-    <b>From:</b> {message.get('from', '')}<br>
-    <b>Date:</b> {message.get('date', '')}<br>
-    <b>To:</b> r@stanton.co
-  </div>
-  <div class="subject">{message.get('subject', 'Receipt')}</div>
-  <div class="body">{body_html}</div>
-</body>
-</html>"""
-
-
-def _generate_summary_pdf(message: dict) -> str:
-    """Last resort: generate a basic summary PDF from message metadata."""
-    html = _text_to_html(message)
-    with tempfile.NamedTemporaryFile(suffix=".html", mode="w",
-                                     encoding="utf-8", delete=False) as f:
-        f.write(html)
-        html_path = f.name
-
-    pdf_path = html_path.replace(".html", ".pdf")
-    subprocess.run(
-        [WKHTMLTOPDF] + WKHTMLTOPDF_ARGS + [html_path, pdf_path],
-        check=True, timeout=30
-    )
-    os.unlink(html_path)
-    return pdf_path
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    tmp.close()
+    pdf.output(tmp.name)
+    log.info(f"Generated PDF: {tmp.name}")
+    return tmp.name
