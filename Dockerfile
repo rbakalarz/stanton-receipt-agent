@@ -26,5 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ ./src/
 
+ENV PYTHONPATH=/app/src
+
 # Railway cron: runs agent.py on schedule defined in railway.toml
-CMD ["python", "src/agent.py"]
+CMD ["python", "/app/src/agent.py"]
